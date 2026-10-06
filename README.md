@@ -7,8 +7,8 @@ Image editing; an open-source, clean-room reimplementation of Adobe Photoshop, r
 前提: Ubuntu/Debian 系、インターネット接続あり。`apt-get` を使うため root 権限で実行してください。
 
 ```sh
-git clone https://github.com/storytold/photocraft.git /opt/photocraft
-cd /opt/photocraft
+git clone https://github.com/hirogura/photocraftweb.git /opt/photocraft2
+cd /opt/photocraft2
 ./install.sh
 ```
 
