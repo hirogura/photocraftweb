@@ -25,15 +25,17 @@ cd /opt/photocraft
 ./install.sh --no-serve     # ビルドのみ（配信しない）
 ```
 
-## GridCraft
+# GridCraft
 
 Node.js + Vite + React 製の GridCraft を 3366 番ポートでセルフホストします。
 
 前提: Ubuntu/Debian 系、インターネット接続あり。`apt-get` を使うため root 権限で実行してください。
 
 ```sh
-git clone https://github.com/storytold/gridcraft.git
-# 本リポジトリを取得済みの場合はそのディレクトリで実行
+git clone https://github.com/storytold/gridcraft.git /opt/gridcraft
+curl -fsSL https://raw.githubusercontent.com/hirogura/photocraftweb/main/gridcraftweb-install.sh -o /opt/gridcraft/gridcraftweb-install.sh
+chmod +x /opt/gridcraft/gridcraftweb-install.sh
+cd /opt/gridcraft
 ./gridcraftweb-install.sh
 ```
 
