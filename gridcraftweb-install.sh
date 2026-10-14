@@ -1,23 +1,27 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# GridCraft Webセルフホスト用インストールスクリプト (Node.js+Vite+React用).
+# GridCraft Webセルフホスト用インストールスクリプト.
 #
-#   1. Node.jsがなければ導入 (apt または nodesource)
-#   2. https://github.com/storytold/gridcraft.git を gridcraft/ に取得 (既存なら pull)
-#   3. `npm ci && npm run build` で dist/ をビルド
+#   1. ビルド環境がなければ導入 (build-essential, rustup stable, wasm target, trunk)
+#   2. https://github.com/storytold/gridcraft.git を取得 (既存なら pull)
+#   3. `trunk build --release` で apps/gridcraft-web -> dist/web をビルド
 #   4. 成果物を public-gridcraft/ に配置し, 3366番ポートで静的配信して使用可能にする
 #
 # Usage:
 #   ./gridcraftweb-install.sh [--port 3366] [--skip-build] [--no-serve]
 #
+# ビルド環境が無い場合は導入してから `trunk build --release` する.
+#
 # Env:
 #   PORT                 配信ポート (default: 3366)
+#   TRUNK_VERSION        trunkバージョン (default: 0.21.14)
 #   SKIP_BUILD=1         ビルドを飛ばして配信だけやり直す
 #   NO_SERVE=1           配信(起動)をしない
 #
 set -euo pipefail
 
 PORT="${PORT:-3366}"
+TRUNK_VERSION="${TRUNK_VERSION:-0.21.14}"
 SKIP_BUILD="${SKIP_BUILD:-0}"
 NO_SERVE="${NO_SERVE:-0}"
 
@@ -45,13 +49,23 @@ done
 export PORT
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SRC_DIR="$ROOT/gridcraft"
-DIST_DIR="$SRC_DIR/dist"
+# README流 (gridcraft のチェックアウト直下で実行) と,
+# 別ディレクトリから clone して使う場合の両方に対応する.
+if [ -f "$ROOT/apps/gridcraft-web/Cargo.toml" ]; then
+  SRC_DIR="$ROOT"
+else
+  SRC_DIR="$ROOT/gridcraft"
+fi
+WEB_DIR="$SRC_DIR/apps/gridcraft-web"
+DIST_DIR="$SRC_DIR/dist/web"
 PUBLIC_DIR="$ROOT/public-gridcraft"
 REPO_URL="https://github.com/storytold/gridcraft.git"
 
 log() { echo "==> $*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
+
+# cargo/rustup のPATHを通す (インストール直後対策).
+export PATH="$HOME/.cargo/bin:/usr/local/bin:$PATH"
 
 install_system_deps() {
   if ! have apt-get; then
@@ -59,7 +73,7 @@ install_system_deps() {
     return 0
   fi
   local missing=()
-  for c in curl ca-certificates python3 git; do
+  for c in gcc make pkg-config curl python3 git; do
     have "$c" || missing+=("$c")
   done
   if [ "${#missing[@]}" -eq 0 ]; then
@@ -69,31 +83,74 @@ install_system_deps() {
   log "システム依存を導入: ${missing[*]}"
   apt-get update
   DEBIAN_FRONTEND=noninteractive apt-get install -y \
-    curl ca-certificates python3 git
+    build-essential pkg-config curl ca-certificates python3 git
 }
 
-install_node() {
-  if have node && have npm; then
-    log "Node.js 済み: $(node --version) / npm $(npm --version)"
+install_rust() {
+  if have cargo && have rustc; then
+    log "Rust 済み: $(rustc --version)"
+  else
+    log "rustup 経由で Rust stable を導入"
+    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+      | sh -s -- -y --default-toolchain stable --profile default
+    export PATH="$HOME/.cargo/bin:$PATH"
+  fi
+  log "wasm target を確保"
+  rustup target add wasm32-unknown-unknown
+}
+
+install_trunk() {
+  if have trunk; then
+    log "trunk 済み: $(trunk --version)"
     return 0
   fi
-  if have apt-get; then
-    log "Node.js を導入 (apt)"
-    apt-get update
-    DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs npm \
-      || {
-        log "apt での導入に失敗したため nodesource から導入"
-        curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
-        DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs
-      }
-  else
-    echo "error: node/npm がなく自動導入できません. 手動で Node.js 20系を導入してください" >&2
-    exit 1
+  local arch
+  arch="$(uname -m)"
+  local target=""
+  case "$arch" in
+    x86_64) target="x86_64-unknown-linux-gnu" ;;
+    aarch64) target="aarch64-unknown-linux-gnu" ;;
+  esac
+  if [ -n "$target" ]; then
+    log "trunk v${TRUNK_VERSION} バイナリを取得 (${target})"
+    local url="https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-${target}.tar.gz"
+    local tmpdir
+    tmpdir="$(mktemp -d)"
+    # shellcheck disable=SC2064
+    trap "rm -rf '$tmpdir'" RETURN
+    if curl -sL "$url" -o "$tmpdir/trunk.tar.gz" \
+      && tar xzf "$tmpdir/trunk.tar.gz" -C "$tmpdir" \
+      && [ -x "$tmpdir/trunk" ]; then
+      if [ -w /usr/local/bin ]; then
+        mv "$tmpdir/trunk" /usr/local/bin/trunk
+      else
+        mkdir -p "$HOME/.cargo/bin"
+        mv "$tmpdir/trunk" "$HOME/.cargo/bin/trunk"
+      fi
+      trap - RETURN
+      rm -rf "$tmpdir"
+      log "trunk 導入: $(trunk --version)"
+      return 0
+    fi
+    trap - RETURN
+    rm -rf "$tmpdir"
+    log "バイナリ取得に失敗したため cargo install にフォールバック"
   fi
-  log "Node.js 導入: $(node --version) / npm $(npm --version)"
+  log "cargo install trunk --locked (数分かかります)"
+  cargo install trunk --locked
 }
 
 fetch_src() {
+  if [ "$SRC_DIR" = "$ROOT" ]; then
+    if [ -d "$SRC_DIR/.git" ]; then
+      log "gridcraft チェックアウト直下のため pull で更新"
+      (cd "$SRC_DIR" && git pull --ff-only)
+    else
+      echo "error: $SRC_DIR は gridcraft のチェックアウトではありません (apps/gridcraft-web/Cargo.toml はあるが .git がない)" >&2
+      exit 1
+    fi
+    return 0
+  fi
   if [ -d "$SRC_DIR/.git" ]; then
     log "gridcraft/ 既存のため pull で更新"
     (cd "$SRC_DIR" && git pull --ff-only)
@@ -111,9 +168,18 @@ build_web() {
     log "ビルドをスキップ (--skip-build)"
     return 0
   fi
-  log "npm ci && npm run build"
-  (cd "$SRC_DIR" && npm ci && npm run build)
+  log "trunk build --release (初回は数分かかります)"
+  (cd "$WEB_DIR" && trunk build --release)
   [ -f "$DIST_DIR/index.html" ] || { echo "error: $DIST_DIR/index.html がありません" >&2; exit 1; }
+  local wasm
+  wasm="$(ls "$DIST_DIR"/*.wasm 2>/dev/null | head -1 || true)"
+  [ -n "$wasm" ] || { echo "error: $DIST_DIR/*.wasm がありません" >&2; exit 1; }
+  local size
+  size="$(wc -c <"$wasm" | tr -d ' ')"
+  log "wasm: $(basename "$wasm") ${size} bytes ($((size / 1048576)) MiB)"
+  if [ "$size" -gt 25165824 ]; then
+    echo "warning: .wasm が24MiB超 (Cloudflare上限25MiBに接近)" >&2
+  fi
 }
 
 deploy_public() {
@@ -128,6 +194,7 @@ serve() {
     log "配信をスキップ (--no-serve)"
     return 0
   fi
+  # 既存の同ポート配信があれば止める (public-gridcraft/ 配信の二重起動防止).
   if have fuser; then
     fuser -k "${PORT}/tcp" 2>/dev/null || true
     sleep 1
@@ -151,12 +218,17 @@ serve() {
     tail -20 /tmp/gridcraft-web-serve.log >&2 || true
     exit 1
   fi
+  if ! curl -s "http://localhost:${PORT}/" | grep -q "gridcraft-web-.*\\.wasm"; then
+    echo "error: :${PORT} がGridCraftアプリを返していません (旧placeholderの可能性)" >&2
+    exit 1
+  fi
 }
 
 main() {
-  log "ROOT=$ROOT PORT=$PORT"
+  log "ROOT=$ROOT SRC_DIR=$SRC_DIR PORT=$PORT"
   install_system_deps
-  install_node
+  install_rust
+  install_trunk
   fetch_src
   build_web
   deploy_public
