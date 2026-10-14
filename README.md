@@ -32,7 +32,7 @@ Node.js + Vite + React 製の GridCraft を 3366 番ポートでセルフホス�
 前提: Ubuntu/Debian 系、インターネット接続あり。`apt-get` を使うため root 権限で実行してください。
 
 ```sh
-git clone https://github.com/Rohan-Shridhar/gridcraft.git
+git clone https://github.com/storytold/gridcraft.git
 # 本リポジトリを取得済みの場合はそのディレクトリで実行
 ./gridcraftweb-install.sh
 ```

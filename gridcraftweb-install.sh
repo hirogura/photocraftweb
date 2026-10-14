@@ -3,7 +3,7 @@
 # GridCraft Webセルフホスト用インストールスクリプト (Node.js+Vite+React用).
 #
 #   1. Node.jsがなければ導入 (apt または nodesource)
-#   2. https://github.com/Rohan-Shridhar/gridcraft.git を gridcraft/ に取得 (既存なら pull)
+#   2. https://github.com/storytold/gridcraft.git を gridcraft/ に取得 (既存なら pull)
 #   3. `npm ci && npm run build` で dist/ をビルド
 #   4. 成果物を public-gridcraft/ に配置し, 3366番ポートで静的配信して使用可能にする
 #
@@ -48,7 +48,7 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SRC_DIR="$ROOT/gridcraft"
 DIST_DIR="$SRC_DIR/dist"
 PUBLIC_DIR="$ROOT/public-gridcraft"
-REPO_URL="https://github.com/Rohan-Shridhar/gridcraft.git"
+REPO_URL="https://github.com/storytold/gridcraft.git"
 
 log() { echo "==> $*"; }
 have() { command -v "$1" >/dev/null 2>&1; }
